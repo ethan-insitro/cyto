@@ -17,9 +17,9 @@ use paraseq::{
 };
 use parking_lot::Mutex;
 
-use super::utils::{open_handle, reopen_handle};
+use crate::io::open_file_handle;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MappingImplementor<M: Mapper> {
     target_mapper: M,
     target_offset: Option<MapperOffset>,
@@ -36,23 +36,18 @@ pub struct MappingImplementor<M: Mapper> {
     local_output_buf: Vec<u8>,
 
     // Output file name
-    filename: String,
-
-    // Lock used to synchronize access to output writer
-    output_lock: Arc<Mutex<()>>,
+    // filename: String,
+    file: Arc<Mutex<Box<dyn Write + Send>>>,
 
     // Exact matching flag
     exact_matching: bool,
-
-    // thread id
-    tid: usize,
 }
 impl<M: Mapper> MappingImplementor<M> {
     pub fn new(
         target_mapper: M,
         target_offset: Option<MapperOffset>,
         geometry: GeometryR1,
-        filename: String,
+        file: Arc<Mutex<Box<dyn Write + Send>>>,
         exact_matching: bool,
     ) -> Self {
         let local_stats = MappingStatistics::default();
@@ -66,14 +61,12 @@ impl<M: Mapper> MappingImplementor<M> {
             barcode_buf: Vec::new(),
             umi_buf: Vec::new(),
             local_output_buf: Vec::new(),
-            filename,
-            output_lock: Arc::new(Mutex::new(())),
+            file,
             exact_matching,
-            tid: 0,
         }
     }
 
-    fn split_r1<R: Record>(&mut self, record: &R) -> Result<bool> {
+    fn encode_r1<R: Record>(&mut self, record: &R) -> Result<bool> {
         // clear encoding buffers
         self.barcode_buf.clear();
         self.umi_buf.clear();
@@ -127,8 +120,8 @@ impl<M: Mapper> PairedParallelProcessor for MappingImplementor<M> {
         r1: Rf,
         r2: Rf,
     ) -> paraseq::parallel::Result<()> {
-        // Split R1 into barcode and UMI
-        if !self.split_r1(&r1)? {
+        // Split R1 into barcode and UMI and 2-bit encode them
+        if !self.encode_r1(&r1)? {
             return Ok(()); // Skip the record if it contains an `N`
         }
 
@@ -152,34 +145,25 @@ impl<M: Mapper> PairedParallelProcessor for MappingImplementor<M> {
     }
 
     fn on_batch_complete(&mut self) -> paraseq::parallel::Result<()> {
-        // Scope the lock to ensure it is released
+        // Scope the lock to ensure it is released early
         {
-            let _lock = self.output_lock.lock();
-            let mut writer = reopen_handle(&self.filename)?;
+            let mut writer = self.file.lock();
             writer.write_all(&self.local_output_buf)?;
-            self.local_output_buf.clear();
             writer.flush()?;
         }
+        self.local_output_buf.clear();
 
         self.global_stats.lock().merge(&self.local_stats);
         self.local_stats.clear();
 
         Ok(())
     }
-
-    fn set_thread_id(&mut self, thread_id: usize) {
-        self.tid = thread_id;
-    }
-
-    fn get_thread_id(&self) -> usize {
-        self.tid
-    }
 }
 
 pub fn ibu_map_pairs_paraseq<M, R>(
     rdr_r1: Reader<R>,
     rdr_r2: Reader<R>,
-    filename: String,
+    filename: &str,
     target_mapper: M,
     target_offset: Option<MapperOffset>,
     geometry: GeometryR1,
@@ -191,19 +175,20 @@ where
     R: Read + Send,
 {
     // Initialize the header and write it to the output file
-    {
-        let header = ibu::Header::try_from(geometry)?;
-        let mut writer = open_handle(&filename)?;
-        header.write_bytes(&mut writer)?;
-        writer.flush()?;
-    }
+    let header = ibu::Header::try_from(geometry)?;
+    let mut writer = open_file_handle(filename)?;
+    header.write_bytes(&mut writer)?;
+    writer.flush()?;
+
+    // Wrap the writer in an Arc<Mutex<W>>
+    let writer = Arc::new(Mutex::new(writer));
 
     // Initialize the mapping implementor
     let implementor = MappingImplementor::new(
         target_mapper,
         target_offset,
         geometry,
-        filename,
+        writer,
         exact_matching,
     );
 
