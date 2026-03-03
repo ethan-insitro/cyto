@@ -10,6 +10,7 @@ use crate::{
     stats::MappingStatistics,
 };
 
+/// MapProcessor for Probed Records
 pub struct MapProcessor<M: Mapper> {
     /* Shared Resources */
     umi_mapper: UmiMapper,
