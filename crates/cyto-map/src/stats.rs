@@ -149,6 +149,12 @@ fn by_name<S: serde::Serializer>(libs: &&[LibraryStatistics], s: S) -> Result<S:
     s.collect_map(libs.iter().map(|lib| (lib.name, lib)))
 }
 
+/// `stats/mapping_run.json`
+#[derive(serde::Serialize)]
+struct MappingRunFile<'a> {
+    inputs: &'a [InputRuntimeStatistics],
+}
+
 pub fn write_statistics<P: AsRef<Path>>(
     outdir: P,
     libstats: &[LibraryStatistics],
@@ -166,7 +172,7 @@ pub fn write_statistics<P: AsRef<Path>>(
     impl_write_statistics(stats_outdir.join("mapping_map.json"), mapstats)?;
     impl_write_statistics(
         stats_outdir.join("mapping_run.json"),
-        serde_json::json!({ "inputs": runstats }),
+        MappingRunFile { inputs: runstats },
     )?;
     Ok(())
 }
