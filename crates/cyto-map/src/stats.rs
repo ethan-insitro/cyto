@@ -50,7 +50,10 @@ pub struct LibraryStatistics {
 }
 
 /// Aggregate mapping statistics for a library
-#[derive(Clone, Copy, Default, Debug, AddAssign)]
+///
+/// Serialized as `MappingMapFile`, the `mapping_map.json` form.
+#[derive(Clone, Copy, Default, Debug, AddAssign, serde::Serialize)]
+#[serde(into = "MappingMapFile")]
 pub struct MappingStatistics {
     pub total_reads: usize,
     pub mapped_reads: usize,
@@ -65,9 +68,32 @@ impl MappingStatistics {
     pub fn clear(&mut self) {
         *self = Self::default();
     }
-    /// The `mapping_map.json` form: fractions (0 without reads), unmapped reasons largest first
-    fn to_json(self) -> serde_json::Value {
-        let unmapped_reads = self.total_reads - self.mapped_reads;
+}
+
+/// `stats/mapping_map.json`: fractions are 0 without reads
+#[derive(serde::Serialize)]
+struct MappingMapFile {
+    total_reads: usize,
+    mapped_reads: usize,
+    unmapped_reads: usize,
+    mapped_reads_frac: f64,
+    unmapped_reads_frac: f64,
+    /// Largest first
+    unmapped: Vec<UnmappedReason>,
+}
+
+/// One reason reads failed to map
+#[derive(serde::Serialize)]
+struct UnmappedReason {
+    reason: &'static str,
+    reads: usize,
+    frac_of_reads: f64,
+    frac_of_unmapped: f64,
+}
+
+impl From<MappingStatistics> for MappingMapFile {
+    fn from(m: MappingStatistics) -> Self {
+        let unmapped_reads = m.total_reads - m.mapped_reads;
         let frac = |x: usize, total: usize| {
             if total > 0 {
                 x as f64 / total as f64
@@ -75,7 +101,7 @@ impl MappingStatistics {
                 0.0
             }
         };
-        let u = self.unmapped;
+        let u = m.unmapped;
         let mut reasons = [
             ("missing_probe", u.missing_probe),
             ("missing_feature", u.missing_feature),
@@ -84,19 +110,22 @@ impl MappingStatistics {
             ("umi_truncated", u.umi_truncated),
         ];
         reasons.sort_by_key(|&(_, reads)| std::cmp::Reverse(reads)); // stable
-        serde_json::json!({
-            "total_reads": self.total_reads,
-            "mapped_reads": self.mapped_reads,
-            "unmapped_reads": unmapped_reads,
-            "mapped_reads_frac": frac(self.mapped_reads, self.total_reads),
-            "unmapped_reads_frac": frac(unmapped_reads, self.total_reads),
-            "unmapped": reasons.map(|(reason, reads)| serde_json::json!({
-                "reason": reason,
-                "reads": reads,
-                "frac_of_reads": frac(reads, self.total_reads),
-                "frac_of_unmapped": frac(reads, unmapped_reads),
-            })),
-        })
+        Self {
+            total_reads: m.total_reads,
+            mapped_reads: m.mapped_reads,
+            unmapped_reads,
+            mapped_reads_frac: frac(m.mapped_reads, m.total_reads),
+            unmapped_reads_frac: frac(unmapped_reads, m.total_reads),
+            unmapped: reasons
+                .into_iter()
+                .map(|(reason, reads)| UnmappedReason {
+                    reason,
+                    reads,
+                    frac_of_reads: frac(reads, m.total_reads),
+                    frac_of_unmapped: frac(reads, unmapped_reads),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -134,7 +163,7 @@ pub fn write_statistics<P: AsRef<Path>>(
             libraries: libstats,
         },
     )?;
-    impl_write_statistics(stats_outdir.join("mapping_map.json"), mapstats.to_json())?;
+    impl_write_statistics(stats_outdir.join("mapping_map.json"), mapstats)?;
     impl_write_statistics(
         stats_outdir.join("mapping_run.json"),
         serde_json::json!({ "inputs": runstats }),
@@ -164,7 +193,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        let json = stats.to_json();
+        let json = serde_json::to_value(stats).unwrap();
         assert_eq!(json["unmapped_reads"], 4);
         assert_eq!(json["unmapped"][0]["reason"], "missing_whitelist");
         assert_eq!(json["unmapped"][0]["frac_of_reads"], 0.3);
@@ -172,7 +201,7 @@ mod tests {
         assert_eq!(json["unmapped"][1]["reason"], "missing_feature");
         assert_eq!(json["unmapped"].as_array().unwrap().len(), 5);
         assert_eq!(
-            MappingStatistics::default().to_json()["mapped_reads_frac"],
+            serde_json::to_value(MappingStatistics::default()).unwrap()["mapped_reads_frac"],
             0.0
         );
     }
