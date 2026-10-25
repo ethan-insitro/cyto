@@ -68,7 +68,13 @@ impl MappingStatistics {
     /// The `mapping_map.json` form: fractions (0 without reads), unmapped reasons largest first
     fn to_json(self) -> serde_json::Value {
         let unmapped_reads = self.total_reads - self.mapped_reads;
-        let frac = |n: usize, total: usize| n as f64 / total.max(1) as f64;
+        let frac = |x: usize, total: usize| {
+            if total > 0 {
+                x as f64 / total as f64
+            } else {
+                0.0
+            }
+        };
         let u = self.unmapped;
         let mut reasons = [
             ("missing_probe", u.missing_probe),
