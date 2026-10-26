@@ -103,20 +103,15 @@ pub fn write_statistics<P: AsRef<Path>>(
     mapstats: MappingStatistics,
     runstats: &[InputRuntimeStatistics],
 ) -> Result<()> {
-    impl_write_statistics(
-        outdir.as_ref().join("stats").join("mapping.json"),
-        MappingFile {
-            reads: mapstats,
-            libraries: libstats,
-            inputs: runstats,
-        },
-    )
-}
-
-fn impl_write_statistics<P: AsRef<Path>, S: serde::Serialize>(path: P, stat: S) -> Result<()> {
-    debug!("Saving statistics to: {}", path.as_ref().display());
+    let path = outdir.as_ref().join("stats").join("mapping.json");
+    debug!("Saving statistics to: {}", path.display());
     let mut handle = open_file_handle(&path)?;
-    serde_json::to_writer_pretty(&mut handle, &stat)?;
+    let file = MappingFile {
+        reads: mapstats,
+        libraries: libstats,
+        inputs: runstats,
+    };
+    serde_json::to_writer_pretty(&mut handle, &file)?;
     Ok(())
 }
 
