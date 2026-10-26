@@ -155,12 +155,14 @@ where
 {
     let mut runstats = Vec::default();
     if inputs.is_binseq() {
-        for (input_id, reader) in inputs.to_binseq_readers()?.into_iter().enumerate() {
+        // to_binseq_readers opens one reader per path, in order
+        let readers = inputs.to_binseq_readers()?;
+        for (path, reader) in inputs.inputs.iter().zip(readers) {
             let start = Instant::now();
             reader.process_parallel(proc.clone(), threads)?;
             let elapsed_sec = start.elapsed().as_secs_f64();
             runstats.push(InputRuntimeStatistics {
-                input_id,
+                paths: vec![path.clone()],
                 elapsed_sec,
             });
         }
@@ -170,7 +172,7 @@ where
         collection.process_parallel_paired(&mut proc, threads, None)?;
         let elapsed_sec = start.elapsed().as_secs_f64();
         runstats.push(InputRuntimeStatistics {
-            input_id: 0,
+            paths: inputs.inputs.clone(),
             elapsed_sec,
         });
     }

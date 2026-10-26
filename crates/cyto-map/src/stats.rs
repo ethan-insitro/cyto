@@ -7,10 +7,11 @@ use log::debug;
 
 use crate::ReadMate;
 
-#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct InputRuntimeStatistics {
-    /// The input identity
-    pub input_id: usize,
+    /// The input files mapped in this pass, as given on the command line: one BINSEQ
+    /// file, or every FASTQ file (all R1/R2 pairs are mapped in one pass)
+    pub paths: Vec<String>,
     /// The amount of time taken to map the input (seconds)
     pub elapsed_sec: f64,
 }
@@ -134,7 +135,7 @@ mod tests {
             },
         };
         let inputs = [InputRuntimeStatistics {
-            input_id: 0,
+            paths: vec!["a.cbq".to_string()],
             elapsed_sec: 1.5,
         }];
         let libraries = [LibraryStatistics {
@@ -159,6 +160,7 @@ mod tests {
         assert_eq!(json["unmapped"]["missing_whitelist"], 3);
         assert_eq!(json["libraries"]["gex"]["total_aggr"], 2);
         assert!(json["libraries"]["gex"].get("name").is_none());
+        assert_eq!(json["inputs"][0]["paths"], serde_json::json!(["a.cbq"]));
         assert_eq!(json["inputs"][0]["elapsed_sec"], 1.5);
     }
 }
