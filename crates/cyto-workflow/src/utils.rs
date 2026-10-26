@@ -1,10 +1,10 @@
-use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
 use anyhow::bail;
 use anyhow::{Context, Result};
+use clap::ValueEnum;
 use cyto_cli::ibu::ArgsReads;
 use cyto_cli::workflow::{
     ArgsGeomux, CrisprMappingCommand, GexMappingCommand, VERSION_CELL_FILTER, VERSION_GEOMUX,
@@ -12,6 +12,7 @@ use cyto_cli::workflow::{
 };
 use cyto_cli::{
     ibu::{ArgsCount, ArgsSort, ArgsUmi},
+    map::{GEOMETRY_CRISPR_FLEX_V1, GEOMETRY_GEX_FLEX_V1},
     workflow::{ArgsWorkflow, WorkflowMode},
 };
 use glob::glob;
@@ -444,10 +445,43 @@ fn run_h5ad_steps<P: AsRef<Path>>(
     Ok(())
 }
 
-pub fn write_done_file<P: AsRef<Path>>(outdir: P, args: &RefWorkflowCommand) -> Result<()> {
-    let done_file = outdir.as_ref().join(".done");
-    let mut file = std::fs::File::create(&done_file)?;
-    writeln!(&mut file, "{args:#?}")?;
+pub fn write_done_file<P: AsRef<Path>>(
+    outdir: P,
+    args: &RefWorkflowCommand,
+    cyto_version: &str,
+) -> Result<()> {
+    let (workflow, map, default_geometry, wf_args) = match args {
+        RefWorkflowCommand::GexMapping(a) => {
+            ("gex", &a.gex_args.map, GEOMETRY_GEX_FLEX_V1, &a.wf_args)
+        }
+        RefWorkflowCommand::CrisprMapping(a) => (
+            "crispr",
+            &a.crispr_args.map,
+            GEOMETRY_CRISPR_FLEX_V1,
+            &a.wf_args,
+        ),
+    };
+    let preset = map
+        .preset
+        .and_then(|preset| preset.to_possible_value())
+        .map(|value| value.get_name().to_owned());
+    let record = serde_json::json!({
+        "cyto_version": cyto_version,
+        "workflow": workflow,
+        "preset": preset,
+        "geometry": map.geometry_or(default_geometry),
+        "options": {
+            "skip_umi": wf_args.skip_umi,
+            "skip_reads": wf_args.skip_reads,
+            "no_filter": wf_args.no_filter,
+            "skip_assignment": wf_args.skip_assignment,
+        },
+        "command": format!("{args:#?}"),
+    });
+    serde_json::to_writer_pretty(
+        std::fs::File::create(outdir.as_ref().join(".done"))?,
+        &record,
+    )?;
     Ok(())
 }
 

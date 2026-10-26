@@ -49,6 +49,14 @@ impl MapOptions {
         }
     }
 
+    /// The geometry to map with: the preset's, else `--geometry`, else `default`
+    pub fn geometry_or<'a>(&'a self, default: &'a str) -> &'a str {
+        match &self.preset {
+            Some(preset) => preset.geometry_str(),
+            None => self.geometry.as_deref().unwrap_or(default),
+        }
+    }
+
     pub fn probe_regex(&self) -> Option<&str> {
         self.probe.probe_regex.as_deref()
     }
