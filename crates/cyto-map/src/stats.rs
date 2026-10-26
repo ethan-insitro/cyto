@@ -82,11 +82,35 @@ pub struct UnmappedStatistics {
 /// `stats/mapping.json`: everything the mapping step measured
 #[derive(serde::Serialize)]
 struct MappingFile<'a> {
-    #[serde(flatten)]
-    reads: MappingStatistics,
+    total_reads: usize,
+    mapped_reads: usize,
+    fraction_mapped: f64,
+    unmapped: UnmappedStatistics,
     #[serde(serialize_with = "by_name")]
     libraries: &'a [LibraryStatistics],
     inputs: &'a [InputRuntimeStatistics],
+}
+
+impl<'a> MappingFile<'a> {
+    fn new(
+        reads: MappingStatistics,
+        libraries: &'a [LibraryStatistics],
+        inputs: &'a [InputRuntimeStatistics],
+    ) -> Self {
+        let fraction_mapped = if reads.total_reads > 0 {
+            reads.mapped_reads as f64 / reads.total_reads as f64
+        } else {
+            0.0
+        };
+        Self {
+            total_reads: reads.total_reads,
+            mapped_reads: reads.mapped_reads,
+            fraction_mapped,
+            unmapped: reads.unmapped,
+            libraries,
+            inputs,
+        }
+    }
 }
 
 /// Writes the libraries as one object keyed by name, in mapping order
@@ -106,11 +130,7 @@ pub fn write_statistics<P: AsRef<Path>>(
     let path = outdir.as_ref().join("stats").join("mapping.json");
     debug!("Saving statistics to: {}", path.display());
     let mut handle = open_file_handle(&path)?;
-    let file = MappingFile {
-        reads: mapstats,
-        libraries: libstats,
-        inputs: runstats,
-    };
+    let file = MappingFile::new(mapstats, libstats, runstats);
     serde_json::to_writer_pretty(&mut handle, &file)?;
     Ok(())
 }
@@ -144,18 +164,18 @@ mod tests {
             exact: false,
             init_time: 0.5,
         }];
-        let file = MappingFile {
-            reads,
-            libraries: &libraries,
-            inputs: &inputs,
-        };
+        let file = MappingFile::new(reads, &libraries, &inputs);
         let json = serde_json::to_value(file).unwrap();
         assert_eq!(json["total_reads"], 10);
         assert_eq!(json["mapped_reads"], 6);
+        assert_eq!(json["fraction_mapped"], 0.6);
         assert_eq!(json["unmapped"]["missing_whitelist"], 3);
         assert_eq!(json["libraries"]["gex"]["total_aggr"], 2);
         assert!(json["libraries"]["gex"].get("name").is_none());
         assert_eq!(json["inputs"][0]["paths"], serde_json::json!(["a.cbq"]));
         assert_eq!(json["inputs"][0]["elapsed_sec"], 1.5);
+
+        let empty = MappingFile::new(MappingStatistics::default(), &[], &[]);
+        assert_eq!(serde_json::to_value(empty).unwrap()["fraction_mapped"], 0.0);
     }
 }
