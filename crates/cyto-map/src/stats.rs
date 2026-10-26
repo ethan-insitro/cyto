@@ -17,7 +17,8 @@ pub struct InputRuntimeStatistics {
 
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct LibraryStatistics {
-    /// The name of the library type
+    /// The name of the library type: its key in `mapping.json`'s `libraries`
+    #[serde(skip_serializing)]
     pub name: &'static str,
 
     /// The total number of elements in the library
@@ -82,8 +83,17 @@ pub struct UnmappedStatistics {
 struct MappingFile<'a> {
     #[serde(flatten)]
     reads: MappingStatistics,
+    #[serde(serialize_with = "by_name")]
     libraries: &'a [LibraryStatistics],
     inputs: &'a [InputRuntimeStatistics],
+}
+
+/// Writes the libraries as one object keyed by name, in mapping order
+fn by_name<S: serde::Serializer>(
+    libs: &&[LibraryStatistics],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_map(libs.iter().map(|lib| (lib.name, lib)))
 }
 
 pub fn write_statistics<P: AsRef<Path>>(
@@ -127,16 +137,28 @@ mod tests {
             input_id: 0,
             elapsed_sec: 1.5,
         }];
+        let libraries = [LibraryStatistics {
+            name: "gex",
+            total_elem: 5,
+            total_aggr: 2,
+            total_hash: 5,
+            position: 0,
+            mate: ReadMate::R2,
+            window: 1,
+            exact: false,
+            init_time: 0.5,
+        }];
         let file = MappingFile {
             reads,
-            libraries: &[],
+            libraries: &libraries,
             inputs: &inputs,
         };
         let json = serde_json::to_value(file).unwrap();
         assert_eq!(json["total_reads"], 10);
         assert_eq!(json["mapped_reads"], 6);
         assert_eq!(json["unmapped"]["missing_whitelist"], 3);
-        assert_eq!(json["libraries"], serde_json::json!([]));
+        assert_eq!(json["libraries"]["gex"]["total_aggr"], 2);
+        assert!(json["libraries"]["gex"].get("name").is_none());
         assert_eq!(json["inputs"][0]["elapsed_sec"], 1.5);
     }
 }
