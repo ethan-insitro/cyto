@@ -9,11 +9,13 @@ use crate::ReadMate;
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct InputRuntimeStatistics {
-    /// The input files mapped in this pass, as given on the command line: one BINSEQ
-    /// file, or every FASTQ file (all R1/R2 pairs are mapped in one pass)
-    pub paths: Vec<String>,
-    /// The amount of time taken to map the input (seconds)
+    /// The input files, as given on the command line
+    pub inputs: Vec<String>,
+    /// The amount of time taken to map all inputs (seconds)
     pub elapsed_sec: f64,
+    /// The time taken to map each input, in `inputs` order. `None` for FASTQ, whose
+    /// R1/R2 pairs are all mapped in one pass
+    pub per_input_elapsed_sec: Option<Vec<f64>>,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize)]
@@ -88,14 +90,15 @@ struct MappingFile<'a> {
     unmapped: UnmappedStatistics,
     #[serde(serialize_with = "by_name")]
     libraries: &'a [LibraryStatistics],
-    inputs: &'a [InputRuntimeStatistics],
+    #[serde(flatten)]
+    runtime: &'a InputRuntimeStatistics,
 }
 
 impl<'a> MappingFile<'a> {
     fn new(
         reads: MappingStatistics,
         libraries: &'a [LibraryStatistics],
-        inputs: &'a [InputRuntimeStatistics],
+        runtime: &'a InputRuntimeStatistics,
     ) -> Self {
         let fraction_mapped = if reads.total_reads > 0 {
             reads.mapped_reads as f64 / reads.total_reads as f64
@@ -108,7 +111,7 @@ impl<'a> MappingFile<'a> {
             fraction_mapped,
             unmapped: reads.unmapped,
             libraries,
-            inputs,
+            runtime,
         }
     }
 }
@@ -125,7 +128,7 @@ pub fn write_statistics<P: AsRef<Path>>(
     outdir: P,
     libstats: &[LibraryStatistics],
     mapstats: MappingStatistics,
-    runstats: &[InputRuntimeStatistics],
+    runstats: &InputRuntimeStatistics,
 ) -> Result<()> {
     let path = outdir.as_ref().join("stats").join("mapping.json");
     debug!("Saving statistics to: {}", path.display());
@@ -149,10 +152,11 @@ mod tests {
                 ..Default::default()
             },
         };
-        let inputs = [InputRuntimeStatistics {
-            paths: vec!["a.cbq".to_string()],
+        let runtime = InputRuntimeStatistics {
+            inputs: vec!["a.cbq".to_string(), "b.cbq".to_string()],
             elapsed_sec: 1.5,
-        }];
+            per_input_elapsed_sec: Some(vec![1.0, 0.5]),
+        };
         let libraries = [LibraryStatistics {
             name: "gex",
             total_elem: 5,
@@ -164,7 +168,7 @@ mod tests {
             exact: false,
             init_time: 0.5,
         }];
-        let file = MappingFile::new(reads, &libraries, &inputs);
+        let file = MappingFile::new(reads, &libraries, &runtime);
         let json = serde_json::to_value(file).unwrap();
         assert_eq!(json["total_reads"], 10);
         assert_eq!(json["mapped_reads"], 6);
@@ -172,10 +176,18 @@ mod tests {
         assert_eq!(json["unmapped"]["missing_whitelist"], 3);
         assert_eq!(json["libraries"]["gex"]["total_aggr"], 2);
         assert!(json["libraries"]["gex"].get("name").is_none());
-        assert_eq!(json["inputs"][0]["paths"], serde_json::json!(["a.cbq"]));
-        assert_eq!(json["inputs"][0]["elapsed_sec"], 1.5);
+        assert_eq!(json["inputs"], serde_json::json!(["a.cbq", "b.cbq"]));
+        assert_eq!(json["elapsed_sec"], 1.5);
+        assert_eq!(json["per_input_elapsed_sec"], serde_json::json!([1.0, 0.5]));
 
-        let empty = MappingFile::new(MappingStatistics::default(), &[], &[]);
-        assert_eq!(serde_json::to_value(empty).unwrap()["fraction_mapped"], 0.0);
+        let fastq = InputRuntimeStatistics {
+            per_input_elapsed_sec: None,
+            ..runtime
+        };
+        let empty =
+            serde_json::to_value(MappingFile::new(MappingStatistics::default(), &[], &fastq))
+                .unwrap();
+        assert_eq!(empty["fraction_mapped"], 0.0);
+        assert!(empty["per_input_elapsed_sec"].is_null());
     }
 }
