@@ -149,33 +149,32 @@ fn process_input<M>(
     inputs: &MultiPairedInput,
     mut proc: MapProcessor<M>,
     threads: usize,
-) -> Result<Vec<InputRuntimeStatistics>>
+) -> Result<InputRuntimeStatistics>
 where
     M: Mapper + Send + Sync + 'static,
 {
-    let mut runstats = Vec::default();
-    if inputs.is_binseq() {
-        for (input_id, reader) in inputs.to_binseq_readers()?.into_iter().enumerate() {
+    let start = Instant::now();
+    let per_input_elapsed_sec = if inputs.is_binseq() {
+        let mut elapsed = Vec::with_capacity(inputs.inputs.len());
+        // to_binseq_readers opens one reader per path, in order
+        for reader in inputs.to_binseq_readers()? {
             let start = Instant::now();
             reader.process_parallel(proc.clone(), threads)?;
-            let elapsed_sec = start.elapsed().as_secs_f64();
-            runstats.push(InputRuntimeStatistics {
-                input_id,
-                elapsed_sec,
-            });
+            elapsed.push(start.elapsed().as_secs_f64());
         }
+        Some(elapsed)
     } else {
+        // all R1/R2 pairs are mapped in one pass, so there is no per-input time
         let collection = inputs.to_paraseq_collection()?;
-        let start = Instant::now();
         collection.process_parallel_paired(&mut proc, threads, None)?;
-        let elapsed_sec = start.elapsed().as_secs_f64();
-        runstats.push(InputRuntimeStatistics {
-            input_id: 0,
-            elapsed_sec,
-        });
-    }
+        None
+    };
     proc.finish_pbar();
-    Ok(runstats)
+    Ok(InputRuntimeStatistics {
+        inputs: inputs.inputs.clone(),
+        elapsed_sec: start.elapsed().as_secs_f64(),
+        per_input_elapsed_sec,
+    })
 }
 
 pub fn run_gex(args: &ArgsGex) -> Result<()> {
