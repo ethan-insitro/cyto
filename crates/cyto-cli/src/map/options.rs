@@ -4,7 +4,7 @@ use crate::map::{GEOMETRY_CRISPR_FLEX_V2, GEOMETRY_GEX_FLEX_V2, GEOMETRY_GEX_FLE
 
 use super::{GEOMETRY_CRISPR_FLEX_V1, GEOMETRY_CRISPR_PROPERSEQ, GEOMETRY_GEX_FLEX_V1};
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, serde::Serialize)]
 #[clap(next_help_heading = "Mapping Options")]
 pub struct MapOptions {
     /// Custom Geometry DSL string
@@ -70,7 +70,7 @@ impl MapOptions {
     }
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, serde::Serialize)]
 #[clap(next_help_heading = "Probe Options")]
 pub struct ProbeOptions {
     /// Path to probe file
@@ -84,7 +84,7 @@ pub struct ProbeOptions {
     pub probe_regex: Option<String>,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, serde::Serialize)]
 #[clap(next_help_heading = "Whitelist Options")]
 pub struct WhitelistOptions {
     /// Path to whitelist file
@@ -92,7 +92,8 @@ pub struct WhitelistOptions {
     pub whitelist: String,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[derive(clap::ValueEnum, Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum GeometryPreset {
     /// [barcode][umi:12]|[gex][:18][probe]
     GexV1,

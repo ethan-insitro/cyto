@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines all CLI argument structures using Clap. This crate is a pure definition layer — it contains no processing logic, only argument parsing, validation, and preset constants. All other crates depend on it for their argument types.
+Defines all CLI argument structures using Clap. This crate is a pure definition layer — it contains no processing logic, only argument parsing, validation, and preset constants. All other crates depend on it for their argument types. The workflow arg structs (and the enums they use, kebab-case like their CLI values) derive `serde::Serialize` so `cyto-workflow` can record every resolved option in `.done`.
 
 ## Key Source Files
 

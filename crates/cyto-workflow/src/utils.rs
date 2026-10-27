@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use anyhow::bail;
 use anyhow::{Context, Result};
-use clap::ValueEnum;
 use cyto_cli::ibu::ArgsReads;
 use cyto_cli::workflow::{
     ArgsGeomux, CrisprMappingCommand, GexMappingCommand, VERSION_CELL_FILTER, VERSION_GEOMUX,
@@ -12,7 +11,7 @@ use cyto_cli::workflow::{
 };
 use cyto_cli::{
     ibu::{ArgsCount, ArgsSort, ArgsUmi},
-    map::{GEOMETRY_CRISPR_FLEX_V1, GEOMETRY_GEX_FLEX_V1},
+    map::{GEOMETRY_CRISPR_FLEX_V1, GEOMETRY_GEX_FLEX_V1, GeometryPreset},
     workflow::{ArgsWorkflow, WorkflowMode},
 };
 use glob::glob;
@@ -450,39 +449,37 @@ pub fn write_done_file<P: AsRef<Path>>(
     args: &RefWorkflowCommand,
     cyto_version: &str,
 ) -> Result<()> {
-    let (workflow, map, default_geometry, wf_args) = match args {
-        RefWorkflowCommand::GexMapping(a) => {
-            ("gex", &a.gex_args.map, GEOMETRY_GEX_FLEX_V1, &a.wf_args)
+    let (workflow, map, default_geometry) = match args {
+        RefWorkflowCommand::GexMapping(a) => ("gex", &a.gex_args.map, GEOMETRY_GEX_FLEX_V1),
+        RefWorkflowCommand::CrisprMapping(a) => {
+            ("crispr", &a.crispr_args.map, GEOMETRY_CRISPR_FLEX_V1)
         }
-        RefWorkflowCommand::CrisprMapping(a) => (
-            "crispr",
-            &a.crispr_args.map,
-            GEOMETRY_CRISPR_FLEX_V1,
-            &a.wf_args,
-        ),
     };
-    let preset = map
-        .preset
-        .and_then(|preset| preset.to_possible_value())
-        .map(|value| value.get_name().to_owned());
-    let record = serde_json::json!({
-        "cyto_version": cyto_version,
-        "workflow": workflow,
-        "preset": preset,
-        "geometry": map.geometry_or(default_geometry),
-        "options": {
-            "skip_umi": wf_args.skip_umi,
-            "skip_reads": wf_args.skip_reads,
-            "no_filter": wf_args.no_filter,
-            "skip_assignment": wf_args.skip_assignment,
-        },
-        "command": format!("{args:#?}"),
-    });
-    serde_json::to_writer_pretty(
-        std::fs::File::create(outdir.as_ref().join(".done"))?,
-        &record,
-    )?;
+    let record = RunRecord {
+        cyto_version,
+        workflow,
+        preset: map.preset,
+        geometry: map.geometry_or(default_geometry),
+        command: std::env::args().collect(),
+        args,
+    };
+    let mut json = serde_json::to_string_pretty(&record)?;
+    json.push('\n');
+    std::fs::write(outdir.as_ref().join(".done"), json)?;
     Ok(())
+}
+
+/// `.done`: the JSON run record `pycyto qc` reads
+#[derive(serde::Serialize)]
+struct RunRecord<'a> {
+    cyto_version: &'a str,
+    workflow: &'a str,
+    preset: Option<GeometryPreset>,
+    geometry: &'a str,
+    /// The command line as invoked (argv)
+    command: Vec<String>,
+    /// Every resolved option, defaults included
+    args: &'a RefWorkflowCommand<'a>,
 }
 
 pub fn write_timings_file<P: AsRef<Path>>(outdir: P, timings: &[ModuleTiming]) -> Result<()> {
@@ -505,8 +502,8 @@ pub fn remove_ibu_dir<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
-#[allow(dead_code)]
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
 pub enum RefWorkflowCommand<'a> {
     GexMapping(&'a GexMappingCommand),
     CrisprMapping(&'a CrisprMappingCommand),
